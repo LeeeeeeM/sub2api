@@ -140,6 +140,7 @@ type UpdateSettingsRequest struct {
 	OIDCConnectUserInfoEmailPath    string `json:"oidc_connect_userinfo_email_path"`
 	OIDCConnectUserInfoIDPath       string `json:"oidc_connect_userinfo_id_path"`
 	OIDCConnectUserInfoUsernamePath string `json:"oidc_connect_userinfo_username_path"`
+	OIDCConnectLogoutURL            string `json:"oidc_connect_logout_url"`
 
 	GitHubOAuthEnabled             bool   `json:"github_oauth_enabled"`
 	GitHubOAuthClientID            string `json:"github_oauth_client_id"`
@@ -1084,6 +1085,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	oidcLogoutURL := strings.TrimSpace(firstNonEmpty(req.OIDCConnectLogoutURL, previousSettings.OIDCConnectLogoutURL))
 	if req.OIDCConnectEnabled {
 		req.OIDCConnectProviderName = strings.TrimSpace(req.OIDCConnectProviderName)
 		req.OIDCConnectClientID = strings.TrimSpace(req.OIDCConnectClientID)
@@ -1146,6 +1148,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		if req.OIDCConnectDiscoveryURL != "" {
 			if err := config.ValidateAbsoluteHTTPURL(req.OIDCConnectDiscoveryURL); err != nil {
 				response.BadRequest(c, "OIDC Discovery URL must be an absolute http(s) URL")
+				return
+			}
+		}
+		if oidcLogoutURL != "" {
+			if err := config.ValidateAbsoluteHTTPURL(oidcLogoutURL); err != nil {
+				response.BadRequest(c, "OIDC Logout URL must be an absolute http(s) URL")
 				return
 			}
 		}
@@ -1584,6 +1592,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		WeChatConnectFrontendRedirectURL:       req.WeChatConnectFrontendRedirectURL,
 		OIDCConnectEnabled:                     req.OIDCConnectEnabled,
 		OIDCConnectProviderName:                req.OIDCConnectProviderName,
+		OIDCConnectLogoutURL:                   oidcLogoutURL,
 		OIDCConnectClientID:                    req.OIDCConnectClientID,
 		OIDCConnectClientSecret:                req.OIDCConnectClientSecret,
 		OIDCConnectIssuerURL:                   req.OIDCConnectIssuerURL,
@@ -2218,6 +2227,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		WeChatConnectFrontendRedirectURL:                       updatedSettings.WeChatConnectFrontendRedirectURL,
 		OIDCConnectEnabled:                                     updatedSettings.OIDCConnectEnabled,
 		OIDCConnectProviderName:                                updatedSettings.OIDCConnectProviderName,
+		OIDCConnectLogoutURL:                                   updatedSettings.OIDCConnectLogoutURL,
 		OIDCConnectClientID:                                    updatedSettings.OIDCConnectClientID,
 		OIDCConnectClientSecretConfigured:                      updatedSettings.OIDCConnectClientSecretConfigured,
 		OIDCConnectIssuerURL:                                   updatedSettings.OIDCConnectIssuerURL,
