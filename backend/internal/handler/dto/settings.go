@@ -116,6 +116,7 @@ type SystemSettings struct {
 
 	OIDCConnectEnabled                bool   `json:"oidc_connect_enabled"`
 	OIDCConnectProviderName           string `json:"oidc_connect_provider_name"`
+	OIDCConnectLogoutURL              string `json:"oidc_connect_logout_url"`
 	OIDCConnectClientID               string `json:"oidc_connect_client_id"`
 	OIDCConnectClientSecretConfigured bool   `json:"oidc_connect_client_secret_configured"`
 	OIDCConnectIssuerURL              string `json:"oidc_connect_issuer_url"`

@@ -113,6 +113,7 @@ type SystemSettings struct {
 	// Generic OIDC OAuth 登录
 	OIDCConnectEnabled                bool
 	OIDCConnectProviderName           string
+	OIDCConnectLogoutURL              string
 	OIDCConnectClientID               string
 	OIDCConnectClientSecret           string
 	OIDCConnectClientSecretConfigured bool
@@ -367,6 +368,7 @@ type PublicSettings struct {
 	PaymentEnabled           bool
 	OIDCOAuthEnabled         bool
 	OIDCOAuthProviderName    string
+	OIDCOAuthLogoutURL       string
 	GitHubOAuthEnabled       bool
 	GoogleOAuthEnabled       bool
 	Version                  string
