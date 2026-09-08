@@ -11,15 +11,19 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
 	upstreamModelsBodyLimit             int64 = 8 << 20
+	groupUpstreamModelsTimeout                = 30 * time.Second
+	groupUpstreamModelsConcurrency            = 8
 	modelsDevRegistryURL                      = "https://models.dev/api.json"
 	modelsDevRegistryTTL                      = 6 * time.Hour
 	UpstreamModelMetadataExtraKey             = "upstream_model_metadata"
@@ -195,6 +199,98 @@ func newUpstreamModelSyncInternalError(message string, err error) error {
 func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, account *Account) ([]string, error) {
 	models, _, err := s.fetchUpstreamModelList(ctx, account)
 	return models, err
+}
+
+// FetchGroupUpstreamModels fetches live model IDs from every schedulable account
+// in a group, then merges and deduplicates the model names. Accounts are queried
+// in parallel with a bounded concurrency so one slow upstream does not delay all
+// other accounts. Individual account failures are skipped when another account
+// returns models successfully.
+func (s *AccountTestService) FetchGroupUpstreamModels(ctx context.Context, groupID int64, platform string) ([]string, error) {
+	if s == nil || s.accountRepo == nil {
+		return nil, newUpstreamModelSyncConfigError("Account test service is not configured", nil)
+	}
+	if groupID <= 0 {
+		return nil, newUpstreamModelSyncConfigError("Group ID is required", nil)
+	}
+
+	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, groupID)
+	if err != nil {
+		return nil, newUpstreamModelSyncInternalError("Failed to load schedulable accounts for group", err)
+	}
+
+	platform = strings.TrimSpace(platform)
+	useMixedScheduling := platform == PlatformAnthropic || platform == PlatformGemini
+	eligibleAccounts := make([]Account, 0, len(accounts))
+	for i := range accounts {
+		account := accounts[i]
+		if platform != "" && platform != PlatformComposite {
+			matchesPlatform := account.Platform == platform
+			if useMixedScheduling && account.Platform == PlatformAntigravity {
+				matchesPlatform = account.IsMixedSchedulingEnabled()
+			}
+			if !matchesPlatform {
+				continue
+			}
+		}
+		eligibleAccounts = append(eligibleAccounts, account)
+	}
+	if len(eligibleAccounts) == 0 {
+		return []string{}, nil
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, groupUpstreamModelsTimeout)
+	defer cancel()
+
+	modelSet := make(map[string]struct{})
+	var mu sync.Mutex
+	var lastErr error
+
+	var group errgroup.Group
+	group.SetLimit(groupUpstreamModelsConcurrency)
+	for i := range eligibleAccounts {
+		account := &eligibleAccounts[i]
+		group.Go(func() error {
+			models, fetchErr := s.FetchUpstreamSupportedModels(probeCtx, account)
+			if fetchErr != nil {
+				slog.Debug("fetch_group_upstream_models_account_failed",
+					"group_id", groupID,
+					"account_id", account.ID,
+					"platform", account.Platform,
+					"error", fetchErr,
+				)
+				mu.Lock()
+				lastErr = fetchErr
+				mu.Unlock()
+				return nil
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			for _, model := range models {
+				model = strings.TrimSpace(model)
+				if model != "" {
+					modelSet[model] = struct{}{}
+				}
+			}
+			return nil
+		})
+	}
+	_ = group.Wait()
+
+	if len(modelSet) == 0 {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return []string{}, nil
+	}
+
+	models := make([]string, 0, len(modelSet))
+	for model := range modelSet {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	return models, nil
 }
 
 // SyncUpstreamModelCatalog fetches the account's live model list, enriches
