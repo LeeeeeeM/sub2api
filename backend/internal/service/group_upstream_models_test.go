@@ -152,3 +152,116 @@ func TestFetchGroupUpstreamModelsReturnsEmptyWhenNoAccountMatchesPlatform(t *tes
 	require.NoError(t, err)
 	require.Empty(t, models)
 }
+
+func TestFetchGroupUpstreamModelsFallsBackToModelMappingWhenListEndpointUnsupported(t *testing.T) {
+	upstream := &parallelGroupModelsUpstream{
+		responses: map[string]parallelGroupModelsResponse{
+			"upstream-live.example": {
+				status: http.StatusOK,
+				body:   `{"data":[{"id":"live-model"},{"id":"MiniMax-M2.5"}]}`,
+			},
+			"upstream-no-list.example": {
+				status: http.StatusNotFound,
+				body:   `{"error":{"message":"not found"}}`,
+			},
+		},
+		started: make(chan struct{}, 2),
+		release: make(chan struct{}),
+	}
+	mappedAccount := groupUpstreamModelsTestAccount(2, "https://upstream-no-list.example")
+	mappedAccount.Credentials["model_mapping"] = map[string]any{
+		"public-minimax": "minimax-m2.5",
+		"public-glm":     "glm-5.2",
+		"wildcard":       " Ignored-* ",
+	}
+	svc := &AccountTestService{
+		accountRepo: &groupUpstreamModelsAccountRepoStub{accounts: []Account{
+			groupUpstreamModelsTestAccount(1, "https://upstream-live.example"),
+			mappedAccount,
+		}},
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+
+	resultCh := make(chan struct {
+		models []string
+		err    error
+	}, 1)
+	go func() {
+		models, err := svc.FetchGroupUpstreamModels(context.Background(), 42, PlatformOpenAI)
+		resultCh <- struct {
+			models []string
+			err    error
+		}{models: models, err: err}
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-upstream.started:
+		case <-time.After(time.Second):
+			close(upstream.release)
+			t.Fatalf("expected both upstream probes to start in parallel; only %d started", i)
+		}
+	}
+	close(upstream.release)
+	result := <-resultCh
+
+	require.NoError(t, result.err)
+	require.Equal(t, []string{"MiniMax-M2.5", "glm-5.2", "live-model", "minimax-m2.5"}, result.models)
+}
+
+func TestFetchGroupUpstreamModelsDoesNotFallbackOnTransientUpstreamErrors(t *testing.T) {
+	upstream := &parallelGroupModelsUpstream{
+		responses: map[string]parallelGroupModelsResponse{
+			"upstream-live.example": {
+				status: http.StatusOK,
+				body:   `{"data":[{"id":"live-model"}]}`,
+			},
+			"upstream-fail.example": {
+				status: http.StatusBadGateway,
+				body:   `{"error":{"message":"temporary upstream failure"}}`,
+			},
+		},
+		started: make(chan struct{}, 2),
+		release: make(chan struct{}),
+	}
+	mappedAccount := groupUpstreamModelsTestAccount(2, "https://upstream-fail.example")
+	mappedAccount.Credentials["model_mapping"] = map[string]any{
+		"public-minimax": "minimax-m2.5",
+	}
+	svc := &AccountTestService{
+		accountRepo: &groupUpstreamModelsAccountRepoStub{accounts: []Account{
+			groupUpstreamModelsTestAccount(1, "https://upstream-live.example"),
+			mappedAccount,
+		}},
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+
+	resultCh := make(chan struct {
+		models []string
+		err    error
+	}, 1)
+	go func() {
+		models, err := svc.FetchGroupUpstreamModels(context.Background(), 42, PlatformOpenAI)
+		resultCh <- struct {
+			models []string
+			err    error
+		}{models: models, err: err}
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-upstream.started:
+		case <-time.After(time.Second):
+			close(upstream.release)
+			t.Fatalf("expected both upstream probes to start in parallel; only %d started", i)
+		}
+	}
+	close(upstream.release)
+	result := <-resultCh
+
+	require.NoError(t, result.err)
+	// 502 is not treated as an unsupported list endpoint, so mapping must not leak in.
+	require.Equal(t, []string{"live-model"}, result.models)
+}
