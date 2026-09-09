@@ -1207,9 +1207,11 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	})
 }
 
-// AvailableModels returns the live model IDs exposed by the upstream accounts
-// attached to the API key's group. Unlike Models, this intentionally bypasses
-// the local model mapping cache and probes each upstream account.
+// AvailableModels returns model IDs for the API key's group by probing each
+// schedulable upstream account. Unlike Models, this bypasses the local
+// model-mapping cache used by /v1/models. When an account's live /models
+// endpoint is unsupported (HTTP 404/405), concrete model_mapping targets are
+// used as a fallback so providers without a catalog still appear.
 // GET /v1/models/available
 func (h *GatewayHandler) AvailableModels(c *gin.Context) {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)

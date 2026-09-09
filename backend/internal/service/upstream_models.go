@@ -201,11 +201,35 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 	return models, err
 }
 
+// resolveAccountModelsForGroupProbe returns live upstream model IDs when the
+// account exposes /models. When that endpoint is intentionally unsupported
+// (HTTP 404/405), it falls back to concrete model_mapping targets — the same
+// recovery SyncUpstreamModelCatalog uses — so providers without a model list
+// still contribute to GET /v1/models/available.
+func (s *AccountTestService) resolveAccountModelsForGroupProbe(ctx context.Context, account *Account) ([]string, error) {
+	models, err := s.FetchUpstreamSupportedModels(ctx, account)
+	if err == nil {
+		return models, nil
+	}
+	configuredModels := configuredUpstreamModelsForCapabilitySync(account)
+	if !upstreamModelListEndpointUnsupported(err) || len(configuredModels) == 0 {
+		return nil, err
+	}
+	slog.Info("fetch_group_upstream_models_using_configured_models",
+		"account_id", upstreamModelSyncAccountID(account),
+		"platform", upstreamModelSyncPlatform(account),
+		"status_code", upstreamModelSyncStatusCode(err),
+		"model_count", len(configuredModels),
+	)
+	return configuredModels, nil
+}
+
 // FetchGroupUpstreamModels fetches live model IDs from every schedulable account
 // in a group, then merges and deduplicates the model names. Accounts are queried
 // in parallel with a bounded concurrency so one slow upstream does not delay all
-// other accounts. Individual account failures are skipped when another account
-// returns models successfully.
+// other accounts. When an account's /models endpoint is unsupported (404/405),
+// concrete model_mapping targets are used as a fallback. Other individual
+// account failures are skipped when another account returns models successfully.
 func (s *AccountTestService) FetchGroupUpstreamModels(ctx context.Context, groupID int64, platform string) ([]string, error) {
 	if s == nil || s.accountRepo == nil {
 		return nil, newUpstreamModelSyncConfigError("Account test service is not configured", nil)
@@ -251,9 +275,9 @@ func (s *AccountTestService) FetchGroupUpstreamModels(ctx context.Context, group
 	for i := range eligibleAccounts {
 		account := &eligibleAccounts[i]
 		group.Go(func() error {
-			models, fetchErr := s.FetchUpstreamSupportedModels(probeCtx, account)
+			models, fetchErr := s.resolveAccountModelsForGroupProbe(probeCtx, account)
 			if fetchErr != nil {
-				slog.Debug("fetch_group_upstream_models_account_failed",
+				slog.Warn("fetch_group_upstream_models_account_failed",
 					"group_id", groupID,
 					"account_id", account.ID,
 					"platform", account.Platform,

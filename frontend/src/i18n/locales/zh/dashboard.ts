@@ -91,7 +91,7 @@ export default {
     currentConcurrency: '当前并发',
     availableModels: '查看可用模型',
     availableModelsTitle: '分组可用模型',
-    availableModelsDescription: '并行查询分组内可调度的上游账号，并合并去重模型名称。',
+    availableModelsDescription: '并行查询分组内可调度的上游账号；若上游不支持模型列表接口，则回退到账号模型映射，并合并去重。',
     availableModelsLoading: '正在查询上游模型...',
     availableModelsEmpty: '未查询到可用模型。',
     availableModelsError: '查询可用模型失败',
