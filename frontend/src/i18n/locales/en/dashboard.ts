@@ -91,7 +91,7 @@ export default {
     currentConcurrency: 'Current Concurrency',
     availableModels: 'View Available Models',
     availableModelsTitle: 'Available Group Models',
-    availableModelsDescription: 'Queries schedulable upstream accounts in parallel, then merges and deduplicates model names.',
+    availableModelsDescription: 'Queries schedulable upstream accounts in parallel. If an account has no model-list endpoint, falls back to its model mapping, then merges and deduplicates.',
     availableModelsLoading: 'Fetching upstream models...',
     availableModelsEmpty: 'No available models were returned.',
     availableModelsError: 'Failed to fetch available models',
