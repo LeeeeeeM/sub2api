@@ -97,22 +97,11 @@ describe('LoginView registration entry', () => {
     getPublicSettingsMock.mockResolvedValue(publicSettings)
   })
 
-  it('shows the registration entry when registration is enabled', async () => {
-    const wrapper = mountLogin()
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('auth.signUp')
-  })
-
-  it('hides the registration entry when registration is disabled', async () => {
-    getPublicSettingsMock.mockResolvedValueOnce({
-      ...publicSettings,
-      registration_enabled: false
-    })
-
+  it('never shows the registration entry even when registration is enabled', async () => {
     const wrapper = mountLogin()
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('auth.signUp')
+    expect(wrapper.text()).not.toContain('auth.dontHaveAccount')
   })
 })
