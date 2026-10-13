@@ -1229,11 +1229,10 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	writeModelsListResponse(c, claude.DefaultModels)
 }
 
-// AvailableModels returns model IDs for the API key's group by probing each
-// schedulable upstream account. Unlike Models, this bypasses the local
-// model-mapping cache used by /v1/models. When an account's live /models
-// endpoint is unsupported (HTTP 404/405), concrete model_mapping targets are
-// used as a fallback so providers without a catalog still appear.
+// AvailableModels returns model IDs for the API key's group by merging each
+// schedulable account's admin connectivity model list (same rules as
+// GET /api/v1/admin/accounts/:id/models). Unlike /v1/models, this does not use
+// the group model allowlist cache.
 // GET /v1/models/available
 func (h *GatewayHandler) AvailableModels(c *gin.Context) {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
