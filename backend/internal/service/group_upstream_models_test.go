@@ -95,14 +95,19 @@ func TestFetchGroupUpstreamModelsMergesLiveModelsInParallel(t *testing.T) {
 		started: make(chan struct{}, 3),
 		release: make(chan struct{}),
 	}
+	failedDiscoveryAccount := groupUpstreamModelsTestAccount(2, "https://upstream-two.example")
+	failedDiscoveryAccount.Credentials["model_mapping"] = map[string]any{
+		"fallback-only": "gpt-5.1",
+	}
 	svc := &AccountTestService{
 		accountRepo: &groupUpstreamModelsAccountRepoStub{accounts: []Account{
 			groupUpstreamModelsTestAccount(1, "https://upstream-one.example"),
-			groupUpstreamModelsTestAccount(2, "https://upstream-two.example"),
+			failedDiscoveryAccount,
 			groupUpstreamModelsTestAccount(3, "https://upstream-three.example"),
 		}},
-		httpUpstream: upstream,
-		cfg:          upstreamModelSyncTestConfig(),
+		httpUpstream:         upstream,
+		openaiGatewayService: newCodexModelsAPIKeyTestService(upstream),
+		cfg:                  upstreamModelSyncTestConfig(),
 	}
 
 	resultCh := make(chan struct {
@@ -129,7 +134,7 @@ func TestFetchGroupUpstreamModelsMergesLiveModelsInParallel(t *testing.T) {
 	result := <-resultCh
 
 	require.NoError(t, result.err)
-	require.Equal(t, []string{"alpha-model", "beta-model", "shared-model"}, result.models)
+	require.Equal(t, []string{"alpha-model", "beta-model", "fallback-only", "shared-model"}, result.models)
 	requests := upstream.requestSnapshot()
 	require.Len(t, requests, 3)
 	require.ElementsMatch(t, []string{
@@ -179,8 +184,9 @@ func TestFetchGroupUpstreamModelsFallsBackToModelMappingWhenListEndpointUnsuppor
 			groupUpstreamModelsTestAccount(1, "https://upstream-live.example"),
 			mappedAccount,
 		}},
-		httpUpstream: upstream,
-		cfg:          upstreamModelSyncTestConfig(),
+		httpUpstream:         upstream,
+		openaiGatewayService: newCodexModelsAPIKeyTestService(upstream),
+		cfg:                  upstreamModelSyncTestConfig(),
 	}
 
 	resultCh := make(chan struct {
@@ -207,10 +213,10 @@ func TestFetchGroupUpstreamModelsFallsBackToModelMappingWhenListEndpointUnsuppor
 	result := <-resultCh
 
 	require.NoError(t, result.err)
-	require.Equal(t, []string{"MiniMax-M2.5", "glm-5.2", "live-model", "minimax-m2.5"}, result.models)
+	require.Equal(t, []string{"MiniMax-M2.5", "live-model", "public-glm", "public-minimax", "wildcard"}, result.models)
 }
 
-func TestFetchGroupUpstreamModelsDoesNotFallbackOnTransientUpstreamErrors(t *testing.T) {
+func TestFetchGroupUpstreamModelsFallsBackToMappingOnTransientUpstreamErrors(t *testing.T) {
 	upstream := &parallelGroupModelsUpstream{
 		responses: map[string]parallelGroupModelsResponse{
 			"upstream-live.example": {
@@ -234,8 +240,9 @@ func TestFetchGroupUpstreamModelsDoesNotFallbackOnTransientUpstreamErrors(t *tes
 			groupUpstreamModelsTestAccount(1, "https://upstream-live.example"),
 			mappedAccount,
 		}},
-		httpUpstream: upstream,
-		cfg:          upstreamModelSyncTestConfig(),
+		httpUpstream:         upstream,
+		openaiGatewayService: newCodexModelsAPIKeyTestService(upstream),
+		cfg:                  upstreamModelSyncTestConfig(),
 	}
 
 	resultCh := make(chan struct {
@@ -262,6 +269,5 @@ func TestFetchGroupUpstreamModelsDoesNotFallbackOnTransientUpstreamErrors(t *tes
 	result := <-resultCh
 
 	require.NoError(t, result.err)
-	// 502 is not treated as an unsupported list endpoint, so mapping must not leak in.
-	require.Equal(t, []string{"live-model"}, result.models)
+	require.Equal(t, []string{"live-model", "public-minimax"}, result.models)
 }
